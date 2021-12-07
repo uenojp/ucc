@@ -21,13 +21,30 @@ struct Token {
     char* str;    // Token string
 };
 
-/* Token being interpreted */
+/* Input program */
+char* user_input;
+
+/* Current Token */
 Token* token;
 
-/* Report error and exit. */
+/* Report an error and exit. */
 void error(char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+    exit(1);
+}
+
+/* Report an error location and exit. */
+void error_at(char* loc, char* fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+
+    int pos = loc - user_input;
+    fprintf(stderr, "%s\n", user_input);
+    fprintf(stderr, "%*s", pos, " ");
+    fprintf(stderr, "^ ");
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, "\n");
     exit(1);
@@ -47,7 +64,7 @@ bool consume(char op) {
 /* Transit the next token if the current token is an operator. */
 void expect(char op) {
     if (token->kind != TK_RESERVED || token->str[0] != op)
-        error("invalid operator '%c", op);
+        error_at(token->str, "invalid operator '%c", op);
     token = token->next;
 }
 
@@ -55,7 +72,7 @@ void expect(char op) {
  * If not, report an error. */
 int expect_number() {
     if (token->kind != TK_NUM)
-        error("not a number");
+        error_at(token->str, "not a number");
     int val = token->val;
     token = token->next;
 
@@ -82,7 +99,8 @@ Token* new_token(TokenKind kind, Token* cur, char* str) {
 }
 
 /* Tokenize p and return the head.next token. */
-Token* tokenize(char* p) {
+Token* tokenize() {
+    char* p = user_input;
     Token head;
     head.next = NULL;
     Token* cur = &head;
@@ -109,7 +127,7 @@ Token* tokenize(char* p) {
             cur->val = strtol(p, &p, 10);
             continue;
         }
-        error("failed to tokenize");
+        error_at(p, "failed to tokenize");
     }
     new_token(TK_EOF, cur, p);
 
@@ -131,7 +149,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    token = tokenize(argv[1]);  // return head.next
+    user_input = argv[1];
+    token = tokenize();  // return head.next
     // show_token_chain(token);
 
     printf(".intel_syntax noprefix\n");
@@ -145,7 +164,7 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        expect('-');
+        expect('-');  // For now, 'expect' can be replaced byconsume.
         printf("    sub rax, %d\n", expect_number());
     }
     printf("    ret\n");
