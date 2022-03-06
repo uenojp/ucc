@@ -162,13 +162,12 @@ Node* primary();
 Node* expr() {
     Node* node = mul();
     for (;;) {
-        if (consume('+')) {
+        if (consume('+'))
             node = new_node(ND_ADD, node, mul());
-        } else if (consume('-')) {
+        else if (consume('-'))
             node = new_node(ND_SUB, node, mul());
-        } else {
+        else
             return node;
-        }
     }
 }
 
@@ -176,24 +175,22 @@ Node* expr() {
 Node* mul() {
     Node* node = unary();
     for (;;) {
-        if (consume('*')) {
+        if (consume('*'))
             node = new_node(ND_MUL, node, unary());
-        } else if (consume('/')) {
+        else if (consume('/'))
             node = new_node(ND_DIV, node, unary());
-        } else {
+        else
             return node;
-        }
     }
 }
 
 /* unary := ("+" | "-")? primary */
 Node* unary() {
-    if (consume('+')) {
+    if (consume('+'))
         return primary();
-    }
-    if (consume('-')) {
+    if (consume('-'))
         return new_node(ND_SUB, new_node_num(0), primary());
-    }
+
     return primary();
 }
 
