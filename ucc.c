@@ -61,10 +61,6 @@ bool at_eof() {
 /* Create new tokne and return it. */
 Token* new_token(TokenKind kind, int val, char* str) {
     Token* tok = calloc(1, sizeof(Token));
-    if (tok == NULL) {
-        perror("new_token: calloc");
-        return NULL;
-    }
     tok->kind = kind;
     tok->val = val;
     tok->str = str;
@@ -85,7 +81,7 @@ Token* tokenize() {
             continue;
         }
 
-        if (*p == '+' || *p == '-') {
+        if (strchr("+-*/()", *p)) {
             cur->next = new_token(TK_RESERVED, -1, p++);
             if (cur->next == NULL)
                 goto err;
@@ -114,6 +110,120 @@ Token* tokenize() {
     return head.next;
 }
 
+/* Grammer
+ * expr    := mul ("+" mul | "-" mul)
+ * mul     := primary ("*" primary | "/" primary)
+ * primary := num | "(" expr ")" */
+
+/* Kind of AST node */
+typedef enum {
+    ND_ADD,  // +
+    ND_SUB,  // -
+    ND_MUL,  // *
+    ND_DIV,  // /
+    ND_NUM,  // Integer
+} NodeKind;
+
+/* AST node */
+typedef struct Node Node;
+struct Node {
+    NodeKind kind;
+    Node* lhs;
+    Node* rhs;
+    int val;  // Only if kind == ND_NUM
+};
+
+Node* new_node(NodeKind kind, Node* lhs, Node* rhs) {
+    Node* node = calloc(1, sizeof(Node));
+    node->kind = kind;
+    node->lhs = lhs;
+    node->rhs = rhs;
+
+    return node;
+}
+
+Node* new_node_num(int val) {
+    Node* node = calloc(1, sizeof(Node));
+    node->kind = ND_NUM;
+    node->val = val;
+    node->lhs = NULL;
+    node->rhs = NULL;
+
+    return node;
+}
+
+Node* expr();
+Node* mul();
+Node* primary();
+
+void print_AST(const Node* node);
+
+/* expr := mul ("+" mul | "-" mul) */
+Node* expr() {
+    Node* node = mul();
+    for (;;) {
+        if (consume('+')) {
+            node = new_node(ND_ADD, node, mul());
+        } else if (consume('-')) {
+            node = new_node(ND_SUB, node, mul());
+        } else {
+            return node;
+        }
+    }
+}
+
+/* mul := primary ("*" primary | "/" primary) */
+Node* mul() {
+    Node* node = primary();
+    for (;;) {
+        if (consume('*')) {
+            node = new_node(ND_MUL, node, primary());
+        } else if (consume('/')) {
+            node = new_node(ND_DIV, node, primary());
+        } else {
+            return node;
+        }
+    }
+}
+
+/* primary := "(" expr ")" | num */
+Node* primary() {
+    if (consume('(')) {
+        Node* node = expr();
+        consume(')');
+        return node;
+    }
+
+    return new_node_num(expect_number());
+}
+
+void gen(const Node* node) {
+    if (node == NULL)
+        return;
+
+    gen(node->lhs);
+    gen(node->rhs);
+
+    if (node->kind == ND_NUM) {
+        printf("    push %d\n", node->val);
+        return;
+    }
+
+    printf("    pop rdi\n");
+    printf("    pop rax\n");
+    if (node->kind == ND_ADD)
+        printf("    add rax, rdi\n");
+    if (node->kind == ND_SUB)
+        printf("    sub rax, rdi\n");
+    if (node->kind == ND_MUL)
+        printf("    imul rax, rdi\n");
+    if (node->kind == ND_DIV) {
+        printf("    cqo\n");
+        printf("    idiv rdi\n");
+    }
+    printf("    push rax\n");
+}
+
 int main(int argc, char** argv) {
     if (argc != 2) {
         printf("invalid arguments count\n");
@@ -122,23 +232,16 @@ int main(int argc, char** argv) {
 
     user_input = argv[1];
     token = tokenize();
-    // print_token_chain(token); // For debug
+    // print_token_chain(token);  // For debug
+
+    Node* node = expr();
 
     printf(".intel_syntax noprefix\n");
     printf(".global main\n");
     printf("\n");
     printf("main:\n");
-    printf("    mov rax, %d\n", expect_number());
-    while (!at_eof()) {
-        if (consume('+')) {
-            printf("    add rax, %d\n", expect_number());
-            continue;
-        }
-        if (consume('-')) {
-            printf("    sub rax, %d\n", expect_number());
-            continue;
-        }
-    }
+    gen(node);
+    printf("    pop rax\n");
     printf("    ret\n");
 
     return 0;
@@ -179,7 +282,7 @@ void print_token_chain(Token* tok) {
             kind = "EOF";
         else
             kind = "UNKNOWN";
-        printf("(%s, %d, \'%s\') => ", kind, cur->val, cur->str);
+        printf("(%s, %d, \'%c\') => ", kind, cur->val, cur->str[0]);
     }
     printf("EOF\n");
 }
