@@ -19,6 +19,7 @@ struct Token {
     Token* next;  // Pointer to next token
     int val;      // Value for number token
     char* str;    // Token string
+    int len;      // Token length
 };
 
 void error(const char* fmt, ...);
@@ -34,17 +35,17 @@ Token* token;
 
 /* Transit the next token if the current token is an operator
  * and return whether it's possible to transit or not. */
-bool consume(char op) {
-    if (token->kind != TK_RESERVED || token->str[0] != op)
+bool consume(const char* op) {
+    if (token->kind != TK_RESERVED || token->len != strlen(op) ||
+        strncmp(token->str, op, token->len))
         return false;
-    /* Transit next token if it's   */
     token = token->next;
 
     return true;
 }
 
-/* Transit the next token and return a value of the current token if it's a number token.
- * If not, report an error. */
+/* Transit the next token and return a value of the current token if it's a
+ * number token. If not, report an error. */
 int expect_number() {
     if (token->kind != TK_NUM)
         error_at(token->str, "expected a number");
@@ -59,11 +60,12 @@ bool at_eof() {
 }
 
 /* Create new tokne and return it. */
-Token* new_token(TokenKind kind, int val, char* str) {
+Token* new_token(TokenKind kind, int val, char* str, int len) {
     Token* tok = calloc(1, sizeof(Token));
     tok->kind = kind;
     tok->val = val;
     tok->str = str;
+    tok->len = len;
 
     return tok;
 }
@@ -81,8 +83,20 @@ Token* tokenize() {
             continue;
         }
 
-        if (strchr("+-*/()", *p)) {
-            cur->next = new_token(TK_RESERVED, -1, p++);
+        int len = 2;  // Token length like "<=" and "=="
+        if (!strncmp("==", p, len) || !strncmp("!=", p, len) || !strncmp("<=", p, len) ||
+            !strncmp(">=", p, len)) {
+            cur->next = new_token(TK_RESERVED, -1, p, len);
+            p += len;
+            if (cur->next == NULL)
+                goto err;
+            cur = cur->next;
+            continue;
+        }
+
+        len = 1;  // Token length like "<", "+" and "("
+        if (strchr("+-*/()<>", *p)) {
+            cur->next = new_token(TK_RESERVED, -1, p++, len);
             if (cur->next == NULL)
                 goto err;
             cur = cur->next;
@@ -95,8 +109,10 @@ Token* tokenize() {
              *     ↑
              *     p
              * str is "12 - 4" (NOT "12") */
-            char* tmp = p;  // Because the order of evaluation of the arguments is unspecified.
-            cur->next = new_token(TK_NUM, strtol(p, &p, 10), tmp);
+            char* const tmp = p;
+            const int val = strtol(p, &p, 10);
+            const int len = p - tmp;
+            cur->next = new_token(TK_NUM, val, tmp, len);
             if (cur->next == NULL)
                 goto err;
             cur = cur->next;
@@ -105,16 +121,19 @@ Token* tokenize() {
     err:
         error_at(p, "failed to tokenize");
     }
-    cur->next = new_token(TK_EOF, -1, p);
+    cur->next = new_token(TK_EOF, -1, p, -1);
 
     return head.next;
 }
 
 /* Grammer
- * expr    := mul ("+" mul | "-" mul)
- * mul     := unary ("*" unary | "/" unary)
- * unary   := ("+" | "-")? primary
- * primary := num | "(" expr ")" */
+ * expr     := equality
+ * equality := relation ("==" relation | "!=" relation)*
+ * relation := add ("<" add | "<=" add | ">" add | ">=" add)*
+ * add      := mul ("+" mul | "-" mul)*
+ * mul      := unary ("*" unary | "/" unary)*
+ * unary    := ("+" | "-")? primary
+ * primary  := num | "(" expr ")" */
 
 /* Kind of AST node */
 typedef enum {
@@ -122,6 +141,11 @@ typedef enum {
     ND_SUB,  // -
     ND_MUL,  // *
     ND_DIV,  // /
+    ND_EQ,   // ==
+    ND_NE,   // !=
+    ND_LT,   // <
+    ND_LE,   // <=
+    /* GT and GE are implemented by swapping both sides in parsing(func relation). */
     ND_NUM,  // Integer
 } NodeKind;
 
@@ -154,30 +178,68 @@ Node* new_node_num(int val) {
 }
 
 Node* expr();
+Node* equality();
+Node* relation();
+Node* add();
 Node* mul();
 Node* unary();
 Node* primary();
 
-/* expr := mul ("+" mul | "-" mul) */
+/* expr := equality */
 Node* expr() {
+    return equality();
+}
+
+/* equality := relation ("==" relation | "!=" relation)* */
+Node* equality() {
+    Node* node = relation();
+    for (;;) {
+        if (consume("=="))
+            node = new_node(ND_EQ, node, relation());
+        else if (consume("!="))
+            node = new_node(ND_NE, node, relation());
+        else
+            return node;
+    }
+}
+
+/* relation := add ("<" add | "<=" add | ">" add | ">=" add)* */
+Node* relation() {
+    Node* node = add();
+    for (;;) {
+        if (consume("<"))
+            node = new_node(ND_LT, node, add());
+        else if (consume("<="))
+            node = new_node(ND_LE, node, add());
+        else if (consume(">"))
+            node = new_node(ND_LT, add(), node);
+        else if (consume(">="))
+            node = new_node(ND_LE, add(), node);
+        else
+            return node;
+    }
+}
+
+/* add := mul ("+" mul | "-" mul)* */
+Node* add() {
     Node* node = mul();
     for (;;) {
-        if (consume('+'))
+        if (consume("+"))
             node = new_node(ND_ADD, node, mul());
-        else if (consume('-'))
+        else if (consume("-"))
             node = new_node(ND_SUB, node, mul());
         else
             return node;
     }
 }
 
-/* mul := unary ("*" unary | "/" unary) */
+/* mul := unary ("*" unary | "/" unary)* */
 Node* mul() {
     Node* node = unary();
     for (;;) {
-        if (consume('*'))
+        if (consume("*"))
             node = new_node(ND_MUL, node, unary());
-        else if (consume('/'))
+        else if (consume("/"))
             node = new_node(ND_DIV, node, unary());
         else
             return node;
@@ -186,9 +248,9 @@ Node* mul() {
 
 /* unary := ("+" | "-")? primary */
 Node* unary() {
-    if (consume('+'))
+    if (consume("+"))
         return primary();
-    if (consume('-'))
+    if (consume("-"))
         return new_node(ND_SUB, new_node_num(0), primary());
 
     return primary();
@@ -196,15 +258,16 @@ Node* unary() {
 
 /* primary := "(" expr ")" | num */
 Node* primary() {
-    if (consume('(')) {
+    if (consume("(")) {
         Node* node = expr();
-        consume(')');
+        consume(")");
         return node;
     }
 
     return new_node_num(expect_number());
 }
 
+/* Generate code emulating a stack machine. */
 void gen(const Node* node) {
     if (node == NULL)
         return;
@@ -229,6 +292,28 @@ void gen(const Node* node) {
         printf("    cqo\n");
         printf("    idiv rdi\n");
     }
+
+    if (node->kind == ND_EQ) {
+        printf("    cmp rax, rdi\n");
+        printf("    sete al\n");
+        printf("    movzb rax, al\n");
+    }
+    if (node->kind == ND_NE) {
+        printf("    cmp rax, rdi\n");
+        printf("    setne al\n");
+        printf("    movzb rax, al\n");
+    }
+    if (node->kind == ND_LT) {
+        printf("    cmp rax, rdi\n");
+        printf("    setl al\n");
+        printf("    movzb rax, al\n");
+    }
+    if (node->kind == ND_LE) {
+        printf("    cmp rax, rdi\n");
+        printf("    setle al\n");
+        printf("    movzb rax, al\n");
+    }
+
     printf("    push rax\n");
 }
 
@@ -290,7 +375,7 @@ void print_token_chain(Token* tok) {
             kind = "EOF";
         else
             kind = "UNKNOWN";
-        printf("(%s, %d, \'%c\') => ", kind, cur->val, cur->str[0]);
+        printf("(%s, %d, \"%.*s\") => ", kind, cur->val, cur->len, cur->str);
     }
     printf("EOF\n");
 }

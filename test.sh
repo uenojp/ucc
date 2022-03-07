@@ -26,8 +26,26 @@ assert 7 "1 + 2 * 3"
 assert 9 "(1 + 2) * 3"
 assert 4 "1+2*3-22/7"
 
-# unary operation
+# unary
 assert 2 "+2"
 assert 0 "-2+2"
+
+# equality and relation
+assert 1 "2==2"
+assert 1 "1!=2"
+
+assert 1 "2>1"
+assert 0 "2>2"
+assert 1 "2>=2"
+assert 0 "1>=2"
+
+assert 1 "1<2"
+assert 0 "2<2"
+assert 1 "2<=2"
+assert 0 "2<=1"
+
+assert 1 "-9<-9+10" # -9 < (-9 + 10)
+assert 1 "-1 < 0 == 1 + 1 >= 2" # (-1 < 0) == ((1 + 1) >= 2)
+assert 0 "-1 < 0 != 1 + 1 >= 2" # (-1 < 0) != ((1 + 1) >= 2)
 
 echo OK
