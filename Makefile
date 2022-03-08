@@ -1,11 +1,20 @@
-CFLAGS = -std=c11 -g -static
+CC     = gcc
+CFLAGS = -std=c11 -g -static -Wall
 
-ucc: ucc.c
+PROGRAM = ucc
+SRCS    = $(wildcard *.c)
+OBJS    = $(SRCS:.c=.o)
 
-test: ucc
+$(PROGRAM): $(OBJS)
+	$(CC) -o $(PROGRAM) $(OBJS)
+
+%.o: %.c $(PROGRAM).h
+	$(CC) $(CFLAGS) -o $@ -c $<
+
+test: $(PROGRAM)
 	./test.sh
 
 clean:
-	rm -f ucc *.o *~ tmp*
+	rm -f $(PROGRAM) $(OBJS) *~ tmp*
 
-.PHONY: clean test
+.PHONY: test clean
