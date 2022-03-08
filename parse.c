@@ -121,6 +121,6 @@ Node* primary(Token** tok) {
 Node* parse(Token* tok) {
     Node* node = expr(&tok);
     if (tok->kind != TK_EOF)
-        error("failed to parse");
+        error_at(tok->str, "extra tokens");
     return node;
 }
